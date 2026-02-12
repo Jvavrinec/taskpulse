@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -12,6 +12,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   serverTimestamp,
   setDoc,
@@ -51,6 +52,46 @@ type Todo = {
 type Tab = "tasks" | "stats";
 type Filter = "all" | "today" | "tomorrow" | "week" | "active" | "done";
 
+type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+type WorkoutPlan = Record<WeekdayKey, { enabled: boolean; part: WorkoutPart }>;
+
+/* =========================
+   Constants
+========================= */
+
+const LS_KEY = "taskpulse_cache_v12";
+
+const partLabel: Record<WorkoutPart, string> = {
+  chest: "Chest",
+  back: "Back",
+  legs: "Legs",
+  arms: "Arms",
+  shoulders: "Shoulders",
+  core: "Core",
+  cardio: "Cardio",
+};
+
+const weekdayOrder: WeekdayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const weekdayName: Record<WeekdayKey, string> = {
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
+};
+
+const defaultPlan: WorkoutPlan = {
+  mon: { enabled: false, part: "chest" },
+  tue: { enabled: false, part: "back" },
+  wed: { enabled: false, part: "legs" },
+  thu: { enabled: false, part: "shoulders" },
+  fri: { enabled: false, part: "arms" },
+  sat: { enabled: false, part: "core" },
+  sun: { enabled: false, part: "cardio" },
+};
+
 /* =========================
    Date helpers
 ========================= */
@@ -87,11 +128,16 @@ function labelDate(key: string) {
   const [, m, d] = key.split("-");
   return `${d}.${m}.`;
 }
-
-/* =========================
-   Local cache
-========================= */
-const LS_KEY = "taskpulse_cache_v11";
+function toWeekdayKeyFromDate(d: Date): WeekdayKey {
+  const day = d.getDay(); // 0 Sun, 1 Mon, ... 6 Sat
+  if (day === 0) return "sun";
+  if (day === 1) return "mon";
+  if (day === 2) return "tue";
+  if (day === 3) return "wed";
+  if (day === 4) return "thu";
+  if (day === 5) return "fri";
+  return "sat";
+}
 
 /* =========================
    Firestore mappers
@@ -128,7 +174,8 @@ function fromFirestoreTodo(id: string, data: any): Todo {
     doneDay: data?.doneDay == null ? undefined : String(data.doneDay),
     dueDay: data?.dueDay == null ? undefined : String(data.dueDay),
 
-    workoutPart: data?.workoutPart == null ? undefined : (String(data.workoutPart) as WorkoutPart),
+    workoutPart:
+      data?.workoutPart == null ? undefined : (String(data.workoutPart) as WorkoutPart),
   };
 }
 
@@ -329,7 +376,9 @@ function GlassCard({
 }) {
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-      <div className={`absolute -top-16 -right-16 h-40 w-40 rounded-full bg-gradient-to-br ${accent} opacity-25 blur-2xl`} />
+      <div
+        className={`absolute -top-16 -right-16 h-40 w-40 rounded-full bg-gradient-to-br ${accent} opacity-25 blur-2xl`}
+      />
       <div className="text-zinc-400 text-sm">{title}</div>
       <div className="text-3xl font-bold mt-1 text-zinc-50">{value}</div>
       {subtitle ? <div className="text-xs text-zinc-500 mt-1">{subtitle}</div> : null}
@@ -409,6 +458,11 @@ export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
+  // workout plan
+  const [plan, setPlan] = useState<WorkoutPlan>(defaultPlan);
+  const [planLoaded, setPlanLoaded] = useState(false);
+  const savePlanTimer = useRef<number | null>(null);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsub();
@@ -436,7 +490,7 @@ export default function Home() {
     await signOut(auth);
   }
 
-  // fetch from Firestore
+  // Fetch todos
   useEffect(() => {
     if (!user) return;
 
@@ -455,6 +509,68 @@ export default function Home() {
       }
     })();
   }, [user]);
+
+  // Fetch plan
+  useEffect(() => {
+    if (!user) return;
+
+    (async () => {
+      try {
+        const settingsRef = doc(db, "users", user.uid, "meta", "settings");
+        const snap = await getDoc(settingsRef);
+        if (snap.exists()) {
+          const data: any = snap.data();
+          const p = data?.workoutPlan;
+          if (p && typeof p === "object") {
+            // merge with defaults
+            const merged: WorkoutPlan = { ...defaultPlan };
+            for (const k of weekdayOrder) {
+              const row = p[k];
+              if (row && typeof row === "object") {
+                merged[k] = {
+                  enabled: Boolean(row.enabled),
+                  part: (row.part as WorkoutPart) ?? defaultPlan[k].part,
+                };
+              }
+            }
+            setPlan(merged);
+          }
+        }
+      } finally {
+        setPlanLoaded(true);
+      }
+    })();
+  }, [user]);
+
+  // Auto-save plan (debounced)
+  useEffect(() => {
+    if (!user) return;
+    if (!planLoaded) return;
+
+    if (savePlanTimer.current) window.clearTimeout(savePlanTimer.current);
+    savePlanTimer.current = window.setTimeout(async () => {
+      try {
+        const settingsRef = doc(db, "users", user.uid, "meta", "settings");
+        await setDoc(
+          settingsRef,
+          { workoutPlan: plan, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } catch {}
+    }, 450);
+
+    return () => {
+      if (savePlanTimer.current) window.clearTimeout(savePlanTimer.current);
+    };
+  }, [plan, user, planLoaded]);
+
+  // When in Workout category: auto-pick workout part from plan based on selected due date
+  useEffect(() => {
+    if (category !== "workout") return;
+    const wd = toWeekdayKeyFromDate(new Date(due));
+    const planned = plan[wd];
+    if (planned?.enabled) setWorkoutPart(planned.part);
+  }, [category, due, plan]);
 
   async function upsertRemote(todo: Todo) {
     if (!user) return;
@@ -485,14 +601,16 @@ export default function Home() {
 
   /* ---------- Derived: category filtering ---------- */
 
-  const todosInCat = useMemo(() => todos.filter((t) => t.category === category), [todos, category]);
+  const todosInCat = useMemo(
+    () => todos.filter((t) => t.category === category),
+    [todos, category]
+  );
 
   const totalCount = todosInCat.length;
   const doneCount = useMemo(() => todosInCat.filter((t) => t.done).length, [todosInCat]);
   const activeCount = totalCount - doneCount;
 
   const points = doneCount;
-  const progressPct = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100);
 
   const streak = useMemo(() => {
     const doneDays = new Set<string>();
@@ -555,12 +673,16 @@ export default function Home() {
       category,
     };
 
-    const newTodo: Todo =
-      category === "workout"
-        ? { ...base, dueDay: day, workoutPart }
-        : category === "work"
-        ? { ...base, dueDay: day }
-        : { ...base };
+    let newTodo: Todo = { ...base };
+
+    if (category === "workout") {
+      const wd = toWeekdayKeyFromDate(new Date(day));
+      const planned = plan[wd];
+      const part = planned?.enabled ? planned.part : workoutPart;
+      newTodo = { ...base, dueDay: day, workoutPart: part };
+    } else if (category === "work") {
+      newTodo = { ...base, dueDay: day };
+    }
 
     setTodos((prev) => [newTodo, ...prev]);
     setInlineText("");
@@ -642,16 +764,24 @@ export default function Home() {
       if (t.done && t.doneDay && t.doneDay in done) done[t.doneDay] += 1;
     }
 
-    const arr = keys.map((k) => ({
-      key: k,
-      wd: labelWeekdayEN(k),
-      date: labelDate(k),
-      planned: planned[k],
-      done: done[k],
-    }));
+    const arr = keys.map((k) => {
+      const wdKey = toWeekdayKeyFromDate(new Date(k));
+      const planRow = plan[wdKey];
+      const planText =
+        category === "workout" && planRow?.enabled ? partLabel[planRow.part] : null;
+
+      return {
+        key: k,
+        wd: labelWeekdayEN(k),
+        date: labelDate(k),
+        planned: planned[k],
+        done: done[k],
+        planText,
+      };
+    });
 
     return { arr };
-  }, [todosInCat]);
+  }, [todosInCat, plan, category]);
 
   const weekTasksByDay = useMemo(() => {
     const today = dayKey(new Date());
@@ -697,15 +827,15 @@ export default function Home() {
   const categoryLabel =
     category === "daily" ? "Daily" : category === "workout" ? "Workout" : "Work";
 
-  const partLabel: Record<WorkoutPart, string> = {
-    chest: "Chest",
-    back: "Back",
-    legs: "Legs",
-    arms: "Arms",
-    shoulders: "Shoulders",
-    core: "Core",
-    cardio: "Cardio",
-  };
+  /* ---------- Workout plan actions ---------- */
+
+  function togglePlanDay(day: WeekdayKey) {
+    setPlan((p) => ({ ...p, [day]: { ...p[day], enabled: !p[day].enabled } }));
+  }
+
+  function setPlanPart(day: WeekdayKey, part: WorkoutPart) {
+    setPlan((p) => ({ ...p, [day]: { ...p[day], part } }));
+  }
 
   return (
     <main className="min-h-screen text-zinc-100">
@@ -721,9 +851,21 @@ export default function Home() {
             <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
               <div className="text-xs text-zinc-400 mb-3">Sections</div>
               <div className="space-y-2">
-                <CatButton active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
-                <CatButton active={category === "workout"} label="Workout" onClick={() => setCategory("workout")} />
-                <CatButton active={category === "work"} label="Work" onClick={() => setCategory("work")} />
+                <CatButton
+                  active={category === "daily"}
+                  label="Daily"
+                  onClick={() => setCategory("daily")}
+                />
+                <CatButton
+                  active={category === "workout"}
+                  label="Workout"
+                  onClick={() => setCategory("workout")}
+                />
+                <CatButton
+                  active={category === "work"}
+                  label="Work"
+                  onClick={() => setCategory("work")}
+                />
               </div>
 
               <div className="mt-4 pt-4 border-t border-white/10 text-xs text-zinc-500">
@@ -741,7 +883,7 @@ export default function Home() {
                   <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-sky-400 via-violet-400 to-rose-400 opacity-90" />
                   <div className="min-w-0">
                     <h1 className="text-3xl sm:text-4xl font-bold tracking-tight truncate">
-                      TaskPulse <span className="text-zinc-400 font-semibold">• {categoryLabel}</span>
+                      {APP_NAME} <span className="text-zinc-400 font-semibold">• {categoryLabel}</span>
                     </h1>
                     <p className="text-zinc-400 mt-1 text-sm truncate">
                       Active <span className="text-zinc-100">{activeCount}</span> • Done{" "}
@@ -770,7 +912,11 @@ export default function Home() {
             {/* Category pills (mobile) */}
             <div className="lg:hidden mt-4 flex gap-2">
               <Chip active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
-              <Chip active={category === "workout"} label="Workout" onClick={() => setCategory("workout")} />
+              <Chip
+                active={category === "workout"}
+                label="Workout"
+                onClick={() => setCategory("workout")}
+              />
               <Chip active={category === "work"} label="Work" onClick={() => setCategory("work")} />
             </div>
 
@@ -808,6 +954,86 @@ export default function Home() {
                 accent="from-sky-400 via-cyan-400 to-emerald-400"
               />
             </div>
+
+            {/* WORKOUT PLAN (only when category=workout) */}
+            {category === "workout" && (
+              <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <div className="text-zinc-100 font-semibold">Workout plan</div>
+                    <div className="text-zinc-400 text-sm">
+                      Pick training days and body parts. Used as default when adding workouts.
+                    </div>
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {user ? "Saved to cloud" : "Sign in to save"}
+                  </div>
+                </div>
+
+                {/* Mobile-first scroll row */}
+                <div className="mt-4 overflow-x-auto">
+                  <div className="flex gap-3 min-w-[820px]">
+                    {weekdayOrder.map((d) => {
+                      const row = plan[d];
+                      return (
+                        <div
+                          key={d}
+                          className="w-[110px] rounded-2xl border border-white/10 bg-zinc-950/30 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold">{weekdayName[d]}</div>
+                            <button
+                              onClick={() => togglePlanDay(d)}
+                              disabled={!user}
+                              className={[
+                                "h-7 w-12 rounded-full border transition relative",
+                                row.enabled
+                                  ? "bg-emerald-500/20 border-emerald-400/40"
+                                  : "bg-white/[0.05] border-white/10",
+                                !user ? "opacity-50" : "",
+                              ].join(" ")}
+                              title={row.enabled ? "Enabled" : "Disabled"}
+                            >
+                              <span
+                                className={[
+                                  "absolute top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-white transition",
+                                  row.enabled ? "left-6" : "left-1",
+                                ].join(" ")}
+                              />
+                            </button>
+                          </div>
+
+                          <div className="mt-3">
+                            <select
+                              value={row.part}
+                              onChange={(e) => setPlanPart(d, e.target.value as WorkoutPart)}
+                              disabled={!user}
+                              className="w-full rounded-xl bg-zinc-900/40 border border-white/10 px-2 py-2 text-sm text-zinc-200 outline-none focus:border-white/20"
+                            >
+                              {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
+                                <option key={p} value={p}>
+                                  {partLabel[p]}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="mt-2 text-xs text-zinc-500">
+                            {row.enabled ? "Training" : "Rest"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Quick info */}
+                <div className="mt-3 text-xs text-zinc-500">
+                  Tip: When you pick a date while adding a Workout task, the app auto-selects the planned body part
+                  for that weekday.
+                </div>
+              </div>
+            )}
 
             {/* TASKS */}
             {tab === "tasks" && (
@@ -958,7 +1184,7 @@ export default function Home() {
                   <div>
                     <div className="text-zinc-100 font-semibold">Weekly calendar</div>
                     <div className="text-zinc-400 text-sm">
-                      This view is based on planned day (Mon–Sun) for the current section.
+                      Planned day (Mon–Sun). {category === "workout" ? "Plan badge is shown for each day." : ""}
                     </div>
                   </div>
 
@@ -970,11 +1196,18 @@ export default function Home() {
 
                       return (
                         <div key={d.key} className="rounded-2xl border border-white/10 bg-zinc-950/30 p-3">
-                          <div className="flex items-baseline justify-between">
-                            <div className="text-sm font-semibold text-zinc-100">
-                              {d.wd} <span className="text-zinc-500 font-normal">({d.date})</span>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-zinc-100">
+                                {d.wd} <span className="text-zinc-500 font-normal">({d.date})</span>
+                              </div>
+                              {d.planText ? (
+                                <div className="text-xs text-zinc-300 mt-1">
+                                  Plan: <span className="text-zinc-100">{d.planText}</span>
+                                </div>
+                              ) : null}
                             </div>
-                            <div className="text-xs text-zinc-400">
+                            <div className="text-xs text-zinc-400 flex-shrink-0">
                               {doneInDay}/{totalInDay}
                             </div>
                           </div>
@@ -1125,7 +1358,12 @@ export default function Home() {
             {category === "workout" && (
               <div className="flex flex-wrap gap-2">
                 {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
-                  <Chip key={p} active={workoutPart === p} label={partLabel[p]} onClick={() => setWorkoutPart(p)} />
+                  <Chip
+                    key={p}
+                    active={workoutPart === p}
+                    label={partLabel[p]}
+                    onClick={() => setWorkoutPart(p)}
+                  />
                 ))}
               </div>
             )}
