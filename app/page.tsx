@@ -26,7 +26,7 @@ type Todo = {
   createdAt: number;
 
   doneAt?: number;
-  doneDay?: string; // YYYY-MM-DD (local)
+  doneDay?: string; // YYYY-MM-DD
 
   dueDay?: string; // YYYY-MM-DD
 };
@@ -37,45 +37,37 @@ type Filter = "all" | "today" | "tomorrow" | "week" | "active" | "done";
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
-
 function dayKey(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
-
 function addDays(base: Date, days: number) {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
   return d;
 }
-
 function startOfWeekMonday(d: Date) {
   const x = new Date(d);
-  const day = x.getDay(); // 0=Sun,1=Mon,...6=Sat
+  const day = x.getDay(); // 0=Sun..6=Sat
   const diff = day === 0 ? -6 : 1 - day;
   x.setDate(x.getDate() + diff);
   x.setHours(0, 0, 0, 0);
   return x;
 }
-
 function weekKeysMonSun(d: Date) {
   const start = startOfWeekMonday(d);
-  const keys: string[] = [];
-  for (let i = 0; i < 7; i++) keys.push(dayKey(addDays(start, i)));
-  return keys;
+  return Array.from({ length: 7 }, (_, i) => dayKey(addDays(start, i)));
 }
-
 function labelWeekdayEN(key: string) {
   const [y, m, dd] = key.split("-").map(Number);
   const dt = new Date(y, m - 1, dd);
   return dt.toLocaleDateString("en-US", { weekday: "short" });
 }
-
 function labelDate(key: string) {
   const [, m, d] = key.split("-");
   return `${d}.${m}.`;
 }
 
-const LS_KEY = "taskpulse_cache_v9";
+const LS_KEY = "taskpulse_cache_v10";
 
 function toFirestoreTodo(t: Todo) {
   return {
@@ -88,7 +80,6 @@ function toFirestoreTodo(t: Todo) {
     updatedAt: serverTimestamp(),
   };
 }
-
 function fromFirestoreTodo(id: string, data: any): Todo {
   return {
     id,
@@ -101,7 +92,7 @@ function fromFirestoreTodo(id: string, data: any): Todo {
   };
 }
 
-/* ----------------- GRAPH HELPERS ----------------- */
+/* ----------------- GRAPH ----------------- */
 
 function niceCeil(n: number) {
   if (n <= 10) return 10;
@@ -115,19 +106,15 @@ function niceCeil(n: number) {
   return 10 * p;
 }
 
-/* ----------------- SVG AREA CHART (NO LIBS) ----------------- */
-
 function buildSmoothPath(points: { x: number; y: number }[]) {
   if (points.length < 2) return "";
   let d = `M ${points[0].x} ${points[0].y}`;
-
   for (let i = 1; i < points.length; i++) {
     const prev = points[i - 1];
     const curr = points[i];
     const midX = (prev.x + curr.x) / 2;
     d += ` Q ${prev.x} ${prev.y} ${midX} ${(prev.y + curr.y) / 2}`;
   }
-
   const last = points[points.length - 1];
   d += ` T ${last.x} ${last.y}`;
   return d;
@@ -164,15 +151,14 @@ function AreaChart14Days({ values, labels }: { values: number[]; labels: string[
   const areaPath = `${line} L ${pts[pts.length - 1].x} ${baseY} L ${pts[0].x} ${baseY} Z`;
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-zinc-950/30 p-4">
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <div className="text-zinc-200 font-semibold">Last 14 days</div>
-          <div className="text-zinc-500 text-sm">Total done (cumulative)</div>
+          <div className="text-zinc-100 font-semibold">Last 14 days</div>
+          <div className="text-zinc-400 text-sm">Total done (cumulative)</div>
         </div>
-
-        <div className="text-zinc-500 text-sm">
-          scale <span className="text-zinc-200">0–{yMax}</span>
+        <div className="text-zinc-400 text-sm">
+          scale <span className="text-zinc-100">0–{yMax}</span>
         </div>
       </div>
 
@@ -236,22 +222,74 @@ function AreaChart14Days({ values, labels }: { values: number[]; labels: string[
 
           <defs>
             <linearGradient id="gradStroke" x1="0" x2="1">
-              <stop offset="0%" stopColor="#8b5cf6" />
-              <stop offset="100%" stopColor="#ec4899" />
+              <stop offset="0%" stopColor="#60a5fa" />
+              <stop offset="50%" stopColor="#a78bfa" />
+              <stop offset="100%" stopColor="#fb7185" />
             </linearGradient>
 
             <linearGradient id="gradFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="rgba(139,92,246,0.32)" />
-              <stop offset="100%" stopColor="rgba(236,72,153,0.04)" />
+              <stop offset="0%" stopColor="rgba(96,165,250,0.28)" />
+              <stop offset="40%" stopColor="rgba(167,139,250,0.18)" />
+              <stop offset="100%" stopColor="rgba(251,113,133,0.04)" />
             </linearGradient>
           </defs>
         </svg>
       </div>
-
-      <div className="mt-2 text-xs text-zinc-600">
-        data max: <span className="text-zinc-300">{dataMax}</span>
-      </div>
     </div>
+  );
+}
+
+/* ----------------- UI helpers ----------------- */
+
+function GlassCard({
+  title,
+  value,
+  subtitle,
+  accent = "from-sky-400 via-violet-400 to-rose-400",
+}: {
+  title: string;
+  value: React.ReactNode;
+  subtitle?: string;
+  accent?: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+      <div className={`absolute -top-16 -right-16 h-40 w-40 rounded-full bg-gradient-to-br ${accent} opacity-25 blur-2xl`} />
+      <div className="text-zinc-400 text-sm">{title}</div>
+      <div className="text-3xl font-bold mt-1 text-zinc-50">{value}</div>
+      {subtitle ? <div className="text-xs text-zinc-500 mt-1">{subtitle}</div> : null}
+    </div>
+  );
+}
+
+function PrimaryButton({
+  children,
+  onClick,
+  disabled,
+  className = "",
+  type,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  className?: string;
+  type?: "button" | "submit";
+}) {
+  return (
+    <button
+      type={type ?? "button"}
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "rounded-2xl px-4 py-3 font-semibold text-zinc-950",
+        "bg-gradient-to-r from-sky-300 via-violet-300 to-rose-300",
+        "hover:from-sky-200 hover:via-violet-200 hover:to-rose-200",
+        "disabled:opacity-40 transition",
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -296,7 +334,6 @@ export default function Home() {
   async function login() {
     await signInWithPopup(auth, new GoogleAuthProvider());
   }
-
   async function logout() {
     await signOut(auth);
   }
@@ -325,7 +362,6 @@ export default function Home() {
     const ref = doc(db, "users", user.uid, "todos", todo.id);
     await setDoc(ref, toFirestoreTodo(todo), { merge: true });
   }
-
   async function patchRemote(id: string, patch: Partial<Todo>) {
     if (!user) return;
     const ref = doc(db, "users", user.uid, "todos", id);
@@ -340,7 +376,6 @@ export default function Home() {
 
     await updateDoc(ref, data);
   }
-
   async function deleteRemote(id: string) {
     if (!user) return;
     const ref = doc(db, "users", user.uid, "todos", id);
@@ -379,7 +414,6 @@ export default function Home() {
 
   async function addTodoInline(day: string) {
     if (!user) return;
-
     const trimmed = inlineText.trim();
     if (!trimmed) return;
 
@@ -412,11 +446,7 @@ export default function Home() {
     setTodos((prev) => prev.map((t) => (t.id === id ? next : t)));
 
     try {
-      await patchRemote(id, {
-        done: next.done,
-        doneAt: next.doneAt,
-        doneDay: next.doneDay,
-      });
+      await patchRemote(id, { done: next.done, doneAt: next.doneAt, doneDay: next.doneDay });
     } catch {}
   }
 
@@ -457,13 +487,11 @@ export default function Home() {
     const weekSet = new Set(weekKeysMonSun(new Date()));
 
     let filtered = todos.slice();
-
     if (filter === "active") filtered = filtered.filter((t) => !t.done);
     if (filter === "done") filtered = filtered.filter((t) => t.done);
 
     if (filter === "today") filtered = filtered.filter((t) => (t.dueDay ?? today) === today);
-    if (filter === "tomorrow")
-      filtered = filtered.filter((t) => (t.dueDay ?? today) === tomorrow);
+    if (filter === "tomorrow") filtered = filtered.filter((t) => (t.dueDay ?? today) === tomorrow);
     if (filter === "week") filtered = filtered.filter((t) => weekSet.has(t.dueDay ?? today));
 
     filtered.sort((a, b) => {
@@ -515,7 +543,6 @@ export default function Home() {
         return b.createdAt - a.createdAt;
       });
     }
-
     return map;
   }, [todos]);
 
@@ -540,174 +567,173 @@ export default function Home() {
   }, [todos]);
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight">{APP_NAME}</h1>
-            <p className="text-zinc-500 mt-2 text-sm">
-              Active <span className="text-zinc-200">{activeCount}</span> • Done{" "}
-              <span className="text-zinc-200">{doneCount}</span> • Total{" "}
-              <span className="text-zinc-200">{totalCount}</span>
-              {user ? (
-                <span className="ml-2">• {user.displayName ?? user.email ?? "user"}</span>
-              ) : (
-                <span className="ml-2">• Sign in to sync</span>
-              )}
-              {syncing ? <span className="ml-2">• Syncing…</span> : null}
-            </p>
+    <main className="min-h-screen text-zinc-100">
+      {/* Background */}
+      <div className="fixed inset-0 -z-10 bg-zinc-950" />
+      <div className="fixed inset-0 -z-10 bg-[radial-gradient(1200px_500px_at_10%_0%,rgba(96,165,250,0.18),transparent_60%),radial-gradient(900px_500px_at_90%_10%,rgba(167,139,250,0.16),transparent_55%),radial-gradient(900px_500px_at_50%_100%,rgba(251,113,133,0.10),transparent_55%)]" />
+      <div className="fixed inset-0 -z-10 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.04),transparent_18%)]" />
+
+      <div className="mx-auto max-w-5xl px-4 pt-6 pb-28 sm:pb-10">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-sky-400 via-violet-400 to-rose-400 opacity-90" />
+              <div className="min-w-0">
+                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight truncate">
+                  {APP_NAME}
+                </h1>
+                <p className="text-zinc-400 mt-1 text-sm truncate">
+                  Active <span className="text-zinc-100">{activeCount}</span> • Done{" "}
+                  <span className="text-zinc-100">{doneCount}</span> • Total{" "}
+                  <span className="text-zinc-100">{totalCount}</span>
+                  {syncing ? <span className="ml-2">• Syncing…</span> : null}
+                </p>
+              </div>
+            </div>
           </div>
 
           {!user ? (
-            <button
-              onClick={login}
-              className="rounded-2xl px-5 py-3 font-semibold text-zinc-950 bg-zinc-100 hover:bg-white transition"
-            >
+            <PrimaryButton onClick={login} className="shrink-0">
               Continue with Google
-            </button>
+            </PrimaryButton>
           ) : (
             <button
               onClick={logout}
-              className="rounded-2xl px-5 py-3 font-semibold bg-zinc-900 border border-white/10 hover:border-white/20 transition"
+              className="shrink-0 rounded-2xl px-4 py-3 font-semibold bg-white/[0.05] border border-white/10 hover:border-white/20 transition"
             >
               Sign out
             </button>
           )}
         </div>
 
-        <div className="mt-6 flex gap-2">
-          <button
-            onClick={() => setTab("tasks")}
-            className={`rounded-2xl px-4 py-2 text-sm border transition ${
-              tab === "tasks"
-                ? "bg-white text-black border-white"
-                : "bg-zinc-900 text-zinc-200 border-white/10 hover:border-white/20"
-            }`}
-          >
-            Tasks
-          </button>
-          <button
-            onClick={() => setTab("stats")}
-            className={`rounded-2xl px-4 py-2 text-sm border transition ${
-              tab === "stats"
-                ? "bg-white text-black border-white"
-                : "bg-zinc-900 text-zinc-200 border-white/10 hover:border-white/20"
-            }`}
-          >
-            Stats
-          </button>
+        {/* Tabs (desktop) */}
+        <div className="mt-5 hidden sm:flex gap-2">
+          {(["tasks", "stats"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={[
+                "rounded-2xl px-4 py-2 text-sm border transition",
+                tab === t
+                  ? "bg-white text-black border-white"
+                  : "bg-white/[0.05] text-zinc-200 border-white/10 hover:border-white/20",
+              ].join(" ")}
+            >
+              {t === "tasks" ? "Tasks" : "Stats"}
+            </button>
+          ))}
         </div>
 
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-3xl border border-white/10 bg-zinc-950/30 p-5">
-            <div className="text-zinc-400 text-sm">Points</div>
-            <div className="text-3xl font-bold mt-1">{points}</div>
-            <div className="text-xs text-zinc-500 mt-1">= done tasks</div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-zinc-950/30 p-5">
-            <div className="text-zinc-400 text-sm">Streak</div>
-            <div className="text-3xl font-bold mt-1">{streak} 🔥</div>
-            <div className="text-xs text-zinc-500 mt-1">days in a row</div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-zinc-950/30 p-5">
-            <div className="text-zinc-400 text-sm">Progress</div>
-            <div className="text-3xl font-bold mt-1">{progressPct}%</div>
-            <div className="mt-3 h-2 rounded-full bg-zinc-800/70 overflow-hidden">
-              <div className="h-full bg-white transition-all duration-500" style={{ width: `${progressPct}%` }} />
-            </div>
-          </div>
+        {/* Stats cards */}
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <GlassCard title="Points" value={points} subtitle="= done tasks" />
+          <GlassCard title="Streak" value={`${streak} 🔥`} subtitle="days in a row" accent="from-violet-400 via-fuchsia-400 to-rose-400" />
+          <GlassCard
+            title="Progress"
+            value={`${progressPct}%`}
+            subtitle="done / total"
+            accent="from-sky-400 via-cyan-400 to-emerald-400"
+          />
         </div>
 
-        {/* ✅ TASKS TAB (the add task area is back) */}
+        {/* TASKS */}
         {tab === "tasks" && (
           <>
-            <div className="mt-6 rounded-3xl border border-white/10 bg-zinc-950/30 p-5">
-              <form onSubmit={addTodo} className="flex flex-col sm:flex-row gap-2">
-                <input
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder={user ? "Write a task…" : "Sign in to add tasks…"}
-                  className="flex-1 rounded-2xl bg-zinc-900/40 border border-white/10 px-4 py-3 outline-none focus:border-white/20"
-                  disabled={!user}
-                />
-                <input
-                  type="date"
-                  value={due}
-                  onChange={(e) => setDue(e.target.value)}
-                  className="rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
-                  disabled={!user}
-                />
-                <button
-                  type="submit"
-                  disabled={!user}
-                  className="rounded-2xl px-5 py-3 font-semibold text-black bg-white hover:bg-zinc-100 disabled:opacity-40 transition"
-                >
-                  Add
-                </button>
-              </form>
+            {/* Desktop add bar */}
+            <div className="mt-5 hidden sm:block">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+                <form onSubmit={addTodo} className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder={user ? "Write a task…" : "Sign in to add tasks…"}
+                    className="flex-1 rounded-2xl bg-zinc-900/40 border border-white/10 px-4 py-3 outline-none focus:border-white/20"
+                    disabled={!user}
+                  />
+                  <input
+                    type="date"
+                    value={due}
+                    onChange={(e) => setDue(e.target.value)}
+                    className="rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
+                    disabled={!user}
+                  />
+                  <PrimaryButton type="submit" disabled={!user}>
+                    Add
+                  </PrimaryButton>
+                </form>
 
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      ["all", "All"],
-                      ["today", "Today"],
-                      ["tomorrow", "Tomorrow"],
-                      ["week", "This week"],
-                      ["active", "Active"],
-                      ["done", "Done"],
-                    ] as const
-                  ).map(([f, label]) => (
-                    <button
-                      key={f}
-                      onClick={() => setFilter(f)}
-                      className={`rounded-2xl px-3 py-2 text-sm transition border ${
-                        filter === f
-                          ? "bg-white text-black border-white"
-                          : "bg-zinc-900/30 border-white/10 text-zinc-200 hover:border-white/20"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        ["all", "All"],
+                        ["today", "Today"],
+                        ["tomorrow", "Tomorrow"],
+                        ["week", "This week"],
+                        ["active", "Active"],
+                        ["done", "Done"],
+                      ] as const
+                    ).map(([f, label]) => (
+                      <button
+                        key={f}
+                        onClick={() => setFilter(f)}
+                        className={[
+                          "rounded-2xl px-3 py-2 text-sm transition border",
+                          filter === f
+                            ? "bg-white text-black border-white"
+                            : "bg-white/[0.05] border-white/10 text-zinc-200 hover:border-white/20",
+                        ].join(" ")}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={clearDone}
+                    disabled={!user || doneCount === 0}
+                    className="rounded-2xl px-3 py-2 text-sm bg-white/[0.05] border border-white/10 text-zinc-200 hover:border-white/20 disabled:opacity-40 transition"
+                  >
+                    Clear done
+                  </button>
                 </div>
-
-                <button
-                  onClick={clearDone}
-                  disabled={!user || doneCount === 0}
-                  className="rounded-2xl px-3 py-2 text-sm bg-zinc-900/30 border border-white/10 text-zinc-200 hover:border-white/20 disabled:opacity-40 transition"
-                >
-                  Clear done
-                </button>
               </div>
             </div>
 
+            {/* List */}
             <ul className="mt-4 space-y-2">
               {visibleTodos.length === 0 ? (
-                <li className="text-zinc-500">Nothing to show.</li>
+                <li className="text-zinc-400">Nothing to show.</li>
               ) : (
                 visibleTodos.map((t) => {
                   const planned = t.dueDay ?? dayKey(new Date());
                   return (
-                    <li key={t.id} className="rounded-2xl border border-white/10 bg-zinc-950/30 px-4 py-3">
+                    <li
+                      key={t.id}
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl px-4 py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <button
                           onClick={() => toggleTodo(t.id)}
-                          className="flex items-start gap-3 text-left"
+                          className="flex items-start gap-3 text-left min-w-0"
                           disabled={!user}
                         >
                           <span
-                            className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border ${
-                              t.done ? "bg-green-500/20 border-green-500 text-green-300" : "border-white/20 text-zinc-300"
-                            }`}
+                            className={[
+                              "mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full border",
+                              t.done
+                                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
+                                : "border-white/20 text-zinc-300",
+                            ].join(" ")}
                           >
                             {t.done ? "✓" : ""}
                           </span>
 
-                          <div className="flex flex-col">
-                            <span className={t.done ? "line-through text-zinc-400" : ""}>{t.text}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className={t.done ? "line-through text-zinc-400" : "text-zinc-100"}>
+                              {t.text}
+                            </span>
                             <span className="text-xs text-zinc-400 mt-1">
                               planned <span className="text-zinc-200">{labelWeekdayEN(planned)}</span> ({labelDate(planned)})
                             </span>
@@ -717,7 +743,7 @@ export default function Home() {
                         <button
                           onClick={() => removeTodo(t.id)}
                           disabled={!user}
-                          className="text-zinc-400 hover:text-white disabled:opacity-40"
+                          className="text-zinc-400 hover:text-white disabled:opacity-40 text-lg leading-none"
                           title="Delete"
                         >
                           ✕
@@ -731,15 +757,15 @@ export default function Home() {
           </>
         )}
 
-        {/* ✅ STATS TAB */}
+        {/* STATS */}
         {tab === "stats" && (
-          <div className="mt-6 space-y-4">
+          <div className="mt-5 space-y-4">
             <AreaChart14Days values={last14.values} labels={last14.labels} />
 
-            <div className="rounded-3xl border border-white/10 bg-zinc-950/30 p-5">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
               <div>
-                <div className="text-zinc-200 font-semibold">Weekly calendar</div>
-                <div className="text-zinc-500 text-sm">
+                <div className="text-zinc-100 font-semibold">Weekly calendar</div>
+                <div className="text-zinc-400 text-sm">
                   Tasks grouped by planned day (Mon–Sun). Add inline directly into a day.
                 </div>
               </div>
@@ -751,24 +777,24 @@ export default function Home() {
                   const totalInDay = list.length;
 
                   return (
-                    <div key={d.key} className="rounded-2xl border border-white/10 bg-zinc-900/20 p-3">
+                    <div key={d.key} className="rounded-2xl border border-white/10 bg-zinc-950/30 p-3">
                       <div className="flex items-baseline justify-between">
-                        <div className="text-sm font-semibold text-zinc-200">
+                        <div className="text-sm font-semibold text-zinc-100">
                           {d.wd} <span className="text-zinc-500 font-normal">({d.date})</span>
                         </div>
-                        <div className="text-xs text-zinc-500">
+                        <div className="text-xs text-zinc-400">
                           {doneInDay}/{totalInDay}
                         </div>
                       </div>
 
                       <div className="mt-3 space-y-2">
                         {list.length === 0 ? (
-                          <div className="text-sm text-zinc-600">No tasks.</div>
+                          <div className="text-sm text-zinc-500">No tasks.</div>
                         ) : (
                           list.map((t) => (
                             <div
                               key={t.id}
-                              className="flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-zinc-950/30 px-3 py-2"
+                              className="flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
                             >
                               <button
                                 onClick={() => toggleTodo(t.id)}
@@ -776,18 +802,17 @@ export default function Home() {
                                 className="flex items-start gap-2 text-left min-w-0"
                               >
                                 <span
-                                  className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border ${
-                                    t.done ? "bg-green-500/20 border-green-500 text-green-300" : "border-white/20 text-zinc-300"
-                                  }`}
+                                  className={[
+                                    "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border",
+                                    t.done
+                                      ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
+                                      : "border-white/20 text-zinc-300",
+                                  ].join(" ")}
                                 >
                                   {t.done ? "✓" : ""}
                                 </span>
 
-                                <span
-                                  className={`text-sm break-words ${
-                                    t.done ? "line-through text-zinc-400" : "text-zinc-200"
-                                  }`}
-                                >
+                                <span className={`text-sm break-words ${t.done ? "line-through text-zinc-400" : "text-zinc-100"}`}>
                                   {t.text}
                                 </span>
                               </button>
@@ -815,15 +840,15 @@ export default function Home() {
                             disabled={!user}
                             className="text-sm text-zinc-200 hover:text-white underline underline-offset-4 disabled:opacity-40"
                           >
-                            + add task to {d.wd}
+                            + add task
                           </button>
                         ) : (
                           <div className="mt-2 flex flex-col gap-2">
                             <input
                               value={inlineText}
                               onChange={(e) => setInlineText(e.target.value)}
-                              placeholder={`New task for ${d.wd}…`}
-                              className="w-full rounded-xl bg-zinc-950/40 border border-white/10 px-3 py-2 text-sm outline-none focus:border-white/20"
+                              placeholder="New task…"
+                              className="w-full rounded-xl bg-zinc-900/40 border border-white/10 px-3 py-2 text-sm outline-none focus:border-white/20"
                               autoFocus
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") addTodoInline(d.key);
@@ -834,18 +859,15 @@ export default function Home() {
                               }}
                             />
                             <div className="flex gap-2">
-                              <button
-                                onClick={() => addTodoInline(d.key)}
-                                className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold text-black bg-white hover:bg-zinc-100"
-                              >
+                              <PrimaryButton onClick={() => addTodoInline(d.key)} className="flex-1 py-2">
                                 Add
-                              </button>
+                              </PrimaryButton>
                               <button
                                 onClick={() => {
                                   setInlineDay(null);
                                   setInlineText("");
                                 }}
-                                className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold bg-zinc-950/40 border border-white/10 text-zinc-200 hover:border-white/20"
+                                className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold bg-white/[0.05] border border-white/10 text-zinc-200 hover:border-white/20"
                               >
                                 Cancel
                               </button>
@@ -858,13 +880,70 @@ export default function Home() {
                 })}
               </div>
 
-              <div className="mt-3 text-xs text-zinc-600">
-                Tip: Press <span className="text-zinc-300">Enter</span> to add,{" "}
-                <span className="text-zinc-300">Esc</span> to cancel.
+              <div className="mt-3 text-xs text-zinc-500">
+                Tip: Press <span className="text-zinc-200">Enter</span> to add,{" "}
+                <span className="text-zinc-200">Esc</span> to cancel.
               </div>
             </div>
           </div>
         )}
+      </div>
+
+      {/* Sticky Add Bar (MOBILE) */}
+      <div className="sm:hidden fixed left-0 right-0 bottom-14 px-4 pb-3">
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 backdrop-blur-xl p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+          <form onSubmit={addTodo} className="flex flex-col gap-2">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={user ? "Add a task…" : "Sign in to add tasks…"}
+              className="w-full rounded-2xl bg-zinc-900/50 border border-white/10 px-4 py-3 outline-none focus:border-white/20 text-base"
+              disabled={!user}
+            />
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={due}
+                onChange={(e) => setDue(e.target.value)}
+                className="flex-1 rounded-2xl bg-zinc-900/50 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
+                disabled={!user}
+              />
+              <PrimaryButton type="submit" disabled={!user} className="px-5">
+                Add
+              </PrimaryButton>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Bottom Nav (MOBILE) */}
+      <div className="sm:hidden fixed left-0 right-0 bottom-0 px-4 pb-4">
+        <div className="rounded-3xl border border-white/10 bg-zinc-950/60 backdrop-blur-xl p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setTab("tasks")}
+              className={[
+                "rounded-2xl py-3 font-semibold border transition",
+                tab === "tasks"
+                  ? "bg-gradient-to-r from-sky-300 via-violet-300 to-rose-300 text-zinc-950 border-white/0"
+                  : "bg-white/[0.05] text-zinc-200 border-white/10",
+              ].join(" ")}
+            >
+              Tasks
+            </button>
+            <button
+              onClick={() => setTab("stats")}
+              className={[
+                "rounded-2xl py-3 font-semibold border transition",
+                tab === "stats"
+                  ? "bg-gradient-to-r from-sky-300 via-violet-300 to-rose-300 text-zinc-950 border-white/0"
+                  : "bg-white/[0.05] text-zinc-200 border-white/10",
+              ].join(" ")}
+            >
+              Stats
+            </button>
+          </div>
+        </div>
       </div>
     </main>
   );
