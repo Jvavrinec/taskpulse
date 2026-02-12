@@ -672,16 +672,19 @@ export default function Home() {
       category,
     };
 
-    let newTodo: Todo = { ...base };
+  let newTodo: Todo = { ...base, dueDay: day };
 
-    if (category === "workout") {
-      const wd = toWeekdayKeyFromDate(new Date(day));
-      const planned = plan[wd];
-      const part = planned?.enabled ? planned.part : workoutPart;
-      newTodo = { ...base, dueDay: day, workoutPart: part };
-    } else if (category === "work") {
-      newTodo = { ...base, dueDay: day };
-    }
+if (category === "workout") {
+  const wd = toWeekdayKeyFromDate(new Date(day));
+  const planned = plan[wd];
+  const part = planned?.enabled ? planned.part : workoutPart;
+  newTodo = { ...base, dueDay: day, workoutPart: part };
+} else if (category === "work") {
+  newTodo = { ...base, dueDay: day };
+} else {
+  // daily
+  newTodo = { ...base, dueDay: day };
+}
 
     setTodos((prev) => [newTodo, ...prev]);
     setInlineText("");
