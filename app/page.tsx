@@ -59,7 +59,7 @@ type WorkoutPlan = Record<WeekdayKey, { enabled: boolean; part: WorkoutPart }>;
    Constants
 ========================= */
 
-const LS_KEY = "taskpulse_cache_v12";
+const LS_KEY = "taskpulse_cache_v13";
 
 const partLabel: Record<WorkoutPart, string> = {
   chest: "Chest",
@@ -522,7 +522,6 @@ export default function Home() {
           const data: any = snap.data();
           const p = data?.workoutPlan;
           if (p && typeof p === "object") {
-            // merge with defaults
             const merged: WorkoutPlan = { ...defaultPlan };
             for (const k of weekdayOrder) {
               const row = p[k];
@@ -883,7 +882,8 @@ export default function Home() {
                   <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-sky-400 via-violet-400 to-rose-400 opacity-90" />
                   <div className="min-w-0">
                     <h1 className="text-3xl sm:text-4xl font-bold tracking-tight truncate">
-                      {APP_NAME} <span className="text-zinc-400 font-semibold">• {categoryLabel}</span>
+                      {APP_NAME}{" "}
+                      <span className="text-zinc-400 font-semibold">• {categoryLabel}</span>
                     </h1>
                     <p className="text-zinc-400 mt-1 text-sm truncate">
                       Active <span className="text-zinc-100">{activeCount}</span> • Done{" "}
@@ -912,11 +912,7 @@ export default function Home() {
             {/* Category pills (mobile) */}
             <div className="lg:hidden mt-4 flex gap-2">
               <Chip active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
-              <Chip
-                active={category === "workout"}
-                label="Workout"
-                onClick={() => setCategory("workout")}
-              />
+              <Chip active={category === "workout"} label="Workout" onClick={() => setCategory("workout")} />
               <Chip active={category === "work"} label="Work" onClick={() => setCategory("work")} />
             </div>
 
@@ -955,82 +951,86 @@ export default function Home() {
               />
             </div>
 
-            {/* WORKOUT PLAN (only when category=workout) */}
+            {/* WORKOUT PLAN as big calendar grid */}
             {category === "workout" && (
               <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
                 <div className="flex items-end justify-between gap-3">
                   <div>
-                    <div className="text-zinc-100 font-semibold">Workout plan</div>
+                    <div className="text-zinc-100 font-semibold">Workout week plan</div>
                     <div className="text-zinc-400 text-sm">
-                      Pick training days and body parts. Used as default when adding workouts.
+                      Plan what you train on each weekday (Mon–Sun).
                     </div>
                   </div>
-                  <div className="text-xs text-zinc-500">
-                    {user ? "Saved to cloud" : "Sign in to save"}
-                  </div>
+                  <div className="text-xs text-zinc-500">{user ? "Saved to cloud" : "Sign in to save"}</div>
                 </div>
 
-                {/* Mobile-first scroll row */}
-                <div className="mt-4 overflow-x-auto">
-                  <div className="flex gap-3 min-w-[820px]">
-                    {weekdayOrder.map((d) => {
-                      const row = plan[d];
-                      return (
-                        <div
-                          key={d}
-                          className="w-[110px] rounded-2xl border border-white/10 bg-zinc-950/30 p-3"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-sm font-semibold">{weekdayName[d]}</div>
-                            <button
-                              onClick={() => togglePlanDay(d)}
-                              disabled={!user}
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {weekdayOrder.map((d) => {
+                    const row = plan[d];
+                    return (
+                      <div
+                        key={d}
+                        className="rounded-2xl border border-white/10 bg-zinc-950/30 p-4"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-zinc-100">{weekdayName[d]}</div>
+
+                          <button
+                            onClick={() => togglePlanDay(d)}
+                            disabled={!user}
+                            className={[
+                              "h-8 w-14 rounded-full border transition relative",
+                              row.enabled
+                                ? "bg-emerald-500/20 border-emerald-400/40"
+                                : "bg-white/[0.05] border-white/10",
+                              !user ? "opacity-50" : "",
+                            ].join(" ")}
+                            title={row.enabled ? "Enabled" : "Disabled"}
+                          >
+                            <span
                               className={[
-                                "h-7 w-12 rounded-full border transition relative",
-                                row.enabled
-                                  ? "bg-emerald-500/20 border-emerald-400/40"
-                                  : "bg-white/[0.05] border-white/10",
-                                !user ? "opacity-50" : "",
+                                "absolute top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-white transition",
+                                row.enabled ? "left-7" : "left-1",
                               ].join(" ")}
-                              title={row.enabled ? "Enabled" : "Disabled"}
-                            >
-                              <span
-                                className={[
-                                  "absolute top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-white transition",
-                                  row.enabled ? "left-6" : "left-1",
-                                ].join(" ")}
-                              />
-                            </button>
-                          </div>
+                            />
+                          </button>
+                        </div>
 
-                          <div className="mt-3">
-                            <select
-                              value={row.part}
-                              onChange={(e) => setPlanPart(d, e.target.value as WorkoutPart)}
-                              disabled={!user}
-                              className="w-full rounded-xl bg-zinc-900/40 border border-white/10 px-2 py-2 text-sm text-zinc-200 outline-none focus:border-white/20"
-                            >
-                              {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
-                                <option key={p} value={p}>
-                                  {partLabel[p]}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                        <div className="mt-3">
+                          <div className="text-xs text-zinc-500 mb-2">Body part</div>
+                          <select
+                            value={row.part}
+                            onChange={(e) => setPlanPart(d, e.target.value as WorkoutPart)}
+                            disabled={!user}
+                            className="w-full rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 text-sm text-zinc-200 outline-none focus:border-white/20"
+                          >
+                            {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
+                              <option key={p} value={p}>
+                                {partLabel[p]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                          <div className="mt-2 text-xs text-zinc-500">
-                            {row.enabled ? "Training" : "Rest"}
+                        <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
+                          <div className="text-xs text-zinc-500">Summary</div>
+                          <div className="text-sm text-zinc-100 mt-1">
+                            {row.enabled ? partLabel[row.part] : "Rest day"}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
+
+                        <div className="mt-3 text-xs text-zinc-500">
+                          {row.enabled
+                            ? "Auto used when you add a workout task on this weekday."
+                            : "Disabled = no default body part."}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {/* Quick info */}
                 <div className="mt-3 text-xs text-zinc-500">
-                  Tip: When you pick a date while adding a Workout task, the app auto-selects the planned body part
-                  for that weekday.
+                  Tip: If the day is enabled, workout tasks on that weekday will automatically get the planned body part.
                 </div>
               </div>
             )}
@@ -1050,7 +1050,6 @@ export default function Home() {
                         disabled={!user}
                       />
 
-                      {/* Due date only for Work/Workout */}
                       {(category === "work" || category === "workout") && (
                         <input
                           type="date"
@@ -1066,7 +1065,6 @@ export default function Home() {
                       </PrimaryButton>
                     </form>
 
-                    {/* Workout part chips */}
                     {category === "workout" && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
@@ -1184,7 +1182,7 @@ export default function Home() {
                   <div>
                     <div className="text-zinc-100 font-semibold">Weekly calendar</div>
                     <div className="text-zinc-400 text-sm">
-                      Planned day (Mon–Sun). {category === "workout" ? "Plan badge is shown for each day." : ""}
+                      Planned day (Mon–Sun). Add inline directly into a day.
                     </div>
                   </div>
 
