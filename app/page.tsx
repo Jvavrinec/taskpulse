@@ -19,20 +19,41 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "./lib/firebase";
 
+/* =========================
+   Types
+========================= */
+
+type Category = "daily" | "workout" | "work";
+type WorkoutPart =
+  | "chest"
+  | "back"
+  | "legs"
+  | "arms"
+  | "shoulders"
+  | "core"
+  | "cardio";
+
 type Todo = {
   id: string;
   text: string;
   done: boolean;
   createdAt: number;
 
+  category: Category;
+
   doneAt?: number;
   doneDay?: string; // YYYY-MM-DD
-
   dueDay?: string; // YYYY-MM-DD
+
+  workoutPart?: WorkoutPart;
 };
 
 type Tab = "tasks" | "stats";
 type Filter = "all" | "today" | "tomorrow" | "week" | "active" | "done";
+
+/* =========================
+   Date helpers
+========================= */
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -67,32 +88,53 @@ function labelDate(key: string) {
   return `${d}.${m}.`;
 }
 
-const LS_KEY = "taskpulse_cache_v10";
+/* =========================
+   Local cache
+========================= */
+const LS_KEY = "taskpulse_cache_v11";
+
+/* =========================
+   Firestore mappers
+========================= */
 
 function toFirestoreTodo(t: Todo) {
   return {
     text: t.text,
     done: t.done,
     createdAt: t.createdAt,
+    category: t.category,
+
     doneAt: t.doneAt ?? null,
     doneDay: t.doneDay ?? null,
     dueDay: t.dueDay ?? null,
+
+    workoutPart: t.workoutPart ?? null,
+
     updatedAt: serverTimestamp(),
   };
 }
+
 function fromFirestoreTodo(id: string, data: any): Todo {
+  const cat = String(data?.category ?? "daily") as Category;
   return {
     id,
     text: String(data?.text ?? ""),
     done: Boolean(data?.done ?? false),
     createdAt: Number(data?.createdAt ?? Date.now()),
+
+    category: cat,
+
     doneAt: data?.doneAt == null ? undefined : Number(data.doneAt),
     doneDay: data?.doneDay == null ? undefined : String(data.doneDay),
     dueDay: data?.dueDay == null ? undefined : String(data.dueDay),
+
+    workoutPart: data?.workoutPart == null ? undefined : (String(data.workoutPart) as WorkoutPart),
   };
 }
 
-/* ----------------- GRAPH ----------------- */
+/* =========================
+   Chart helpers
+========================= */
 
 function niceCeil(n: number) {
   if (n <= 10) return 10;
@@ -239,28 +281,9 @@ function AreaChart14Days({ values, labels }: { values: number[]; labels: string[
   );
 }
 
-/* ----------------- UI helpers ----------------- */
-
-function GlassCard({
-  title,
-  value,
-  subtitle,
-  accent = "from-sky-400 via-violet-400 to-rose-400",
-}: {
-  title: string;
-  value: React.ReactNode;
-  subtitle?: string;
-  accent?: string;
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-      <div className={`absolute -top-16 -right-16 h-40 w-40 rounded-full bg-gradient-to-br ${accent} opacity-25 blur-2xl`} />
-      <div className="text-zinc-400 text-sm">{title}</div>
-      <div className="text-3xl font-bold mt-1 text-zinc-50">{value}</div>
-      {subtitle ? <div className="text-xs text-zinc-500 mt-1">{subtitle}</div> : null}
-    </div>
-  );
-}
+/* =========================
+   UI helpers
+========================= */
 
 function PrimaryButton({
   children,
@@ -293,17 +316,91 @@ function PrimaryButton({
   );
 }
 
-/* ----------------------------- APP ----------------------------- */
+function GlassCard({
+  title,
+  value,
+  subtitle,
+  accent = "from-sky-400 via-violet-400 to-rose-400",
+}: {
+  title: string;
+  value: React.ReactNode;
+  subtitle?: string;
+  accent?: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+      <div className={`absolute -top-16 -right-16 h-40 w-40 rounded-full bg-gradient-to-br ${accent} opacity-25 blur-2xl`} />
+      <div className="text-zinc-400 text-sm">{title}</div>
+      <div className="text-3xl font-bold mt-1 text-zinc-50">{value}</div>
+      {subtitle ? <div className="text-xs text-zinc-500 mt-1">{subtitle}</div> : null}
+    </div>
+  );
+}
+
+function CatButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        "w-full rounded-2xl px-3 py-3 text-left border transition",
+        active
+          ? "bg-white text-black border-white"
+          : "bg-white/[0.05] text-zinc-200 border-white/10 hover:border-white/20",
+      ].join(" ")}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Chip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        "rounded-2xl px-3 py-2 text-sm transition border",
+        active
+          ? "bg-white text-black border-white"
+          : "bg-white/[0.05] border-white/10 text-zinc-200 hover:border-white/20",
+      ].join(" ")}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* =========================
+   Main
+========================= */
 
 export default function Home() {
   const APP_NAME = "TaskPulse";
 
   const [user, setUser] = useState<User | null>(null);
+
+  const [category, setCategory] = useState<Category>("daily");
   const [tab, setTab] = useState<Tab>("tasks");
   const [filter, setFilter] = useState<Filter>("all");
 
   const [text, setText] = useState("");
   const [due, setDue] = useState<string>(dayKey(new Date()));
+  const [workoutPart, setWorkoutPart] = useState<WorkoutPart>("chest");
 
   const [inlineDay, setInlineDay] = useState<string | null>(null);
   const [inlineText, setInlineText] = useState("");
@@ -317,6 +414,7 @@ export default function Home() {
     return () => unsub();
   }, []);
 
+  // local cache
   useEffect(() => {
     try {
       const cached = localStorage.getItem(LS_KEY);
@@ -338,6 +436,7 @@ export default function Home() {
     await signOut(auth);
   }
 
+  // fetch from Firestore
   useEffect(() => {
     if (!user) return;
 
@@ -373,6 +472,8 @@ export default function Home() {
     if ("doneAt" in patch) data.doneAt = patch.doneAt ?? null;
     if ("doneDay" in patch) data.doneDay = patch.doneDay ?? null;
     if ("dueDay" in patch) data.dueDay = patch.dueDay ?? null;
+    if ("category" in patch) data.category = patch.category ?? "daily";
+    if ("workoutPart" in patch) data.workoutPart = patch.workoutPart ?? null;
 
     await updateDoc(ref, data);
   }
@@ -382,12 +483,34 @@ export default function Home() {
     await deleteDoc(ref);
   }
 
-  const totalCount = todos.length;
-  const doneCount = useMemo(() => todos.filter((t) => t.done).length, [todos]);
+  /* ---------- Derived: category filtering ---------- */
+
+  const todosInCat = useMemo(() => todos.filter((t) => t.category === category), [todos, category]);
+
+  const totalCount = todosInCat.length;
+  const doneCount = useMemo(() => todosInCat.filter((t) => t.done).length, [todosInCat]);
   const activeCount = totalCount - doneCount;
 
   const points = doneCount;
   const progressPct = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100);
+
+  const streak = useMemo(() => {
+    const doneDays = new Set<string>();
+    for (const t of todosInCat) if (t.done && t.doneDay) doneDays.add(t.doneDay);
+
+    let s = 0;
+    let d = new Date();
+    while (true) {
+      const k = dayKey(d);
+      if (!doneDays.has(k)) break;
+      s++;
+      d = new Date(d);
+      d.setDate(d.getDate() - 1);
+    }
+    return s;
+  }, [todosInCat]);
+
+  /* ---------- Actions ---------- */
 
   async function addTodo(e: React.FormEvent) {
     e.preventDefault();
@@ -396,13 +519,20 @@ export default function Home() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    const newTodo: Todo = {
+    const base: Todo = {
       id: crypto.randomUUID(),
       text: trimmed,
       done: false,
       createdAt: Date.now(),
-      dueDay: due,
+      category,
     };
+
+    const newTodo: Todo =
+      category === "workout"
+        ? { ...base, dueDay: due, workoutPart }
+        : category === "work"
+        ? { ...base, dueDay: due }
+        : { ...base };
 
     setTodos((prev) => [newTodo, ...prev]);
     setText("");
@@ -417,13 +547,20 @@ export default function Home() {
     const trimmed = inlineText.trim();
     if (!trimmed) return;
 
-    const newTodo: Todo = {
+    const base: Todo = {
       id: crypto.randomUUID(),
       text: trimmed,
       done: false,
       createdAt: Date.now(),
-      dueDay: day,
+      category,
     };
+
+    const newTodo: Todo =
+      category === "workout"
+        ? { ...base, dueDay: day, workoutPart }
+        : category === "work"
+        ? { ...base, dueDay: day }
+        : { ...base };
 
     setTodos((prev) => [newTodo, ...prev]);
     setInlineText("");
@@ -458,35 +595,22 @@ export default function Home() {
   }
 
   async function clearDone() {
-    const ids = todos.filter((t) => t.done).map((t) => t.id);
-    setTodos((prev) => prev.filter((t) => !t.done));
+    const ids = todosInCat.filter((t) => t.done).map((t) => t.id);
+    setTodos((prev) => prev.filter((t) => !(t.category === category && t.done)));
     try {
       for (const id of ids) await deleteRemote(id);
     } catch {}
   }
 
-  const streak = useMemo(() => {
-    const doneDays = new Set<string>();
-    for (const t of todos) if (t.done && t.doneDay) doneDays.add(t.doneDay);
-
-    let s = 0;
-    let d = new Date();
-    while (true) {
-      const k = dayKey(d);
-      if (!doneDays.has(k)) break;
-      s++;
-      d = new Date(d);
-      d.setDate(d.getDate() - 1);
-    }
-    return s;
-  }, [todos]);
+  /* ---------- Filters (per category) ---------- */
 
   const visibleTodos = useMemo(() => {
     const today = dayKey(new Date());
     const tomorrow = dayKey(addDays(new Date(), 1));
     const weekSet = new Set(weekKeysMonSun(new Date()));
 
-    let filtered = todos.slice();
+    let filtered = todosInCat.slice();
+
     if (filter === "active") filtered = filtered.filter((t) => !t.done);
     if (filter === "done") filtered = filtered.filter((t) => t.done);
 
@@ -504,14 +628,16 @@ export default function Home() {
     });
 
     return filtered;
-  }, [todos, filter]);
+  }, [todosInCat, filter]);
+
+  /* ---------- Weekly calendar & 14d chart (per category) ---------- */
 
   const weekStats = useMemo(() => {
     const keys = weekKeysMonSun(new Date());
     const planned: Record<string, number> = Object.fromEntries(keys.map((k) => [k, 0]));
     const done: Record<string, number> = Object.fromEntries(keys.map((k) => [k, 0]));
 
-    for (const t of todos) {
+    for (const t of todosInCat) {
       if (t.dueDay && t.dueDay in planned) planned[t.dueDay] += 1;
       if (t.done && t.doneDay && t.doneDay in done) done[t.doneDay] += 1;
     }
@@ -525,14 +651,14 @@ export default function Home() {
     }));
 
     return { arr };
-  }, [todos]);
+  }, [todosInCat]);
 
   const weekTasksByDay = useMemo(() => {
     const today = dayKey(new Date());
     const map: Record<string, Todo[]> = {};
     for (const k of weekKeysMonSun(new Date())) map[k] = [];
 
-    for (const t of todos) {
+    for (const t of todosInCat) {
       const dueKey = t.dueDay ?? today;
       if (dueKey in map) map[dueKey].push(t);
     }
@@ -544,7 +670,7 @@ export default function Home() {
       });
     }
     return map;
-  }, [todos]);
+  }, [todosInCat]);
 
   const last14 = useMemo(() => {
     const end = new Date();
@@ -552,7 +678,7 @@ export default function Home() {
     for (let i = 13; i >= 0; i--) keys.push(dayKey(addDays(end, -i)));
 
     const perDay: Record<string, number> = Object.fromEntries(keys.map((k) => [k, 0]));
-    for (const t of todos) {
+    for (const t of todosInCat) {
       if (t.done && t.doneDay && t.doneDay in perDay) perDay[t.doneDay] += 1;
     }
 
@@ -564,7 +690,22 @@ export default function Home() {
 
     const labels = keys.map((k) => labelDate(k));
     return { values, labels };
-  }, [todos]);
+  }, [todosInCat]);
+
+  /* ---------- Labels ---------- */
+
+  const categoryLabel =
+    category === "daily" ? "Daily" : category === "workout" ? "Workout" : "Work";
+
+  const partLabel: Record<WorkoutPart, string> = {
+    chest: "Chest",
+    back: "Back",
+    legs: "Legs",
+    arms: "Arms",
+    shoulders: "Shoulders",
+    core: "Core",
+    cardio: "Cardio",
+  };
 
   return (
     <main className="min-h-screen text-zinc-100">
@@ -573,320 +714,380 @@ export default function Home() {
       <div className="fixed inset-0 -z-10 bg-[radial-gradient(1200px_500px_at_10%_0%,rgba(96,165,250,0.18),transparent_60%),radial-gradient(900px_500px_at_90%_10%,rgba(167,139,250,0.16),transparent_55%),radial-gradient(900px_500px_at_50%_100%,rgba(251,113,133,0.10),transparent_55%)]" />
       <div className="fixed inset-0 -z-10 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.04),transparent_18%)]" />
 
-      <div className="mx-auto max-w-5xl px-4 pt-6 pb-28 sm:pb-10">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-sky-400 via-violet-400 to-rose-400 opacity-90" />
+      <div className="mx-auto max-w-6xl px-4 pt-6 pb-28 sm:pb-10">
+        <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4">
+          {/* Sidebar (desktop) */}
+          <aside className="hidden lg:block">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+              <div className="text-xs text-zinc-400 mb-3">Sections</div>
+              <div className="space-y-2">
+                <CatButton active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
+                <CatButton active={category === "workout"} label="Workout" onClick={() => setCategory("workout")} />
+                <CatButton active={category === "work"} label="Work" onClick={() => setCategory("work")} />
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-white/10 text-xs text-zinc-500">
+                Current: <span className="text-zinc-200">{categoryLabel}</span>
+              </div>
+            </div>
+          </aside>
+
+          {/* Main */}
+          <section>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight truncate">
-                  {APP_NAME}
-                </h1>
-                <p className="text-zinc-400 mt-1 text-sm truncate">
-                  Active <span className="text-zinc-100">{activeCount}</span> • Done{" "}
-                  <span className="text-zinc-100">{doneCount}</span> • Total{" "}
-                  <span className="text-zinc-100">{totalCount}</span>
-                  {syncing ? <span className="ml-2">• Syncing…</span> : null}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {!user ? (
-            <PrimaryButton onClick={login} className="shrink-0">
-              Continue with Google
-            </PrimaryButton>
-          ) : (
-            <button
-              onClick={logout}
-              className="shrink-0 rounded-2xl px-4 py-3 font-semibold bg-white/[0.05] border border-white/10 hover:border-white/20 transition"
-            >
-              Sign out
-            </button>
-          )}
-        </div>
-
-        {/* Tabs (desktop) */}
-        <div className="mt-5 hidden sm:flex gap-2">
-          {(["tasks", "stats"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={[
-                "rounded-2xl px-4 py-2 text-sm border transition",
-                tab === t
-                  ? "bg-white text-black border-white"
-                  : "bg-white/[0.05] text-zinc-200 border-white/10 hover:border-white/20",
-              ].join(" ")}
-            >
-              {t === "tasks" ? "Tasks" : "Stats"}
-            </button>
-          ))}
-        </div>
-
-        {/* Stats cards */}
-        <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <GlassCard title="Points" value={points} subtitle="= done tasks" />
-          <GlassCard title="Streak" value={`${streak} 🔥`} subtitle="days in a row" accent="from-violet-400 via-fuchsia-400 to-rose-400" />
-          <GlassCard
-            title="Progress"
-            value={`${progressPct}%`}
-            subtitle="done / total"
-            accent="from-sky-400 via-cyan-400 to-emerald-400"
-          />
-        </div>
-
-        {/* TASKS */}
-        {tab === "tasks" && (
-          <>
-            {/* Desktop add bar */}
-            <div className="mt-5 hidden sm:block">
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-                <form onSubmit={addTodo} className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder={user ? "Write a task…" : "Sign in to add tasks…"}
-                    className="flex-1 rounded-2xl bg-zinc-900/40 border border-white/10 px-4 py-3 outline-none focus:border-white/20"
-                    disabled={!user}
-                  />
-                  <input
-                    type="date"
-                    value={due}
-                    onChange={(e) => setDue(e.target.value)}
-                    className="rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
-                    disabled={!user}
-                  />
-                  <PrimaryButton type="submit" disabled={!user}>
-                    Add
-                  </PrimaryButton>
-                </form>
-
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    {(
-                      [
-                        ["all", "All"],
-                        ["today", "Today"],
-                        ["tomorrow", "Tomorrow"],
-                        ["week", "This week"],
-                        ["active", "Active"],
-                        ["done", "Done"],
-                      ] as const
-                    ).map(([f, label]) => (
-                      <button
-                        key={f}
-                        onClick={() => setFilter(f)}
-                        className={[
-                          "rounded-2xl px-3 py-2 text-sm transition border",
-                          filter === f
-                            ? "bg-white text-black border-white"
-                            : "bg-white/[0.05] border-white/10 text-zinc-200 hover:border-white/20",
-                        ].join(" ")}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-sky-400 via-violet-400 to-rose-400 opacity-90" />
+                  <div className="min-w-0">
+                    <h1 className="text-3xl sm:text-4xl font-bold tracking-tight truncate">
+                      TaskPulse <span className="text-zinc-400 font-semibold">• {categoryLabel}</span>
+                    </h1>
+                    <p className="text-zinc-400 mt-1 text-sm truncate">
+                      Active <span className="text-zinc-100">{activeCount}</span> • Done{" "}
+                      <span className="text-zinc-100">{doneCount}</span> • Total{" "}
+                      <span className="text-zinc-100">{totalCount}</span>
+                      {syncing ? <span className="ml-2">• Syncing…</span> : null}
+                    </p>
                   </div>
-
-                  <button
-                    onClick={clearDone}
-                    disabled={!user || doneCount === 0}
-                    className="rounded-2xl px-3 py-2 text-sm bg-white/[0.05] border border-white/10 text-zinc-200 hover:border-white/20 disabled:opacity-40 transition"
-                  >
-                    Clear done
-                  </button>
                 </div>
               </div>
+
+              {!user ? (
+                <PrimaryButton onClick={login} className="shrink-0">
+                  Continue with Google
+                </PrimaryButton>
+              ) : (
+                <button
+                  onClick={logout}
+                  className="shrink-0 rounded-2xl px-4 py-3 font-semibold bg-white/[0.05] border border-white/10 hover:border-white/20 transition"
+                >
+                  Sign out
+                </button>
+              )}
             </div>
 
-            {/* List */}
-            <ul className="mt-4 space-y-2">
-              {visibleTodos.length === 0 ? (
-                <li className="text-zinc-400">Nothing to show.</li>
-              ) : (
-                visibleTodos.map((t) => {
-                  const planned = t.dueDay ?? dayKey(new Date());
-                  return (
-                    <li
-                      key={t.id}
-                      className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl px-4 py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <button
-                          onClick={() => toggleTodo(t.id)}
-                          className="flex items-start gap-3 text-left min-w-0"
-                          disabled={!user}
-                        >
-                          <span
-                            className={[
-                              "mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full border",
-                              t.done
-                                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
-                                : "border-white/20 text-zinc-300",
-                            ].join(" ")}
-                          >
-                            {t.done ? "✓" : ""}
-                          </span>
+            {/* Category pills (mobile) */}
+            <div className="lg:hidden mt-4 flex gap-2">
+              <Chip active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
+              <Chip active={category === "workout"} label="Workout" onClick={() => setCategory("workout")} />
+              <Chip active={category === "work"} label="Work" onClick={() => setCategory("work")} />
+            </div>
 
-                          <div className="flex flex-col min-w-0">
-                            <span className={t.done ? "line-through text-zinc-400" : "text-zinc-100"}>
-                              {t.text}
-                            </span>
-                            <span className="text-xs text-zinc-400 mt-1">
-                              planned <span className="text-zinc-200">{labelWeekdayEN(planned)}</span> ({labelDate(planned)})
-                            </span>
-                          </div>
-                        </button>
+            {/* Tabs (desktop) */}
+            <div className="mt-4 hidden sm:flex gap-2">
+              {(["tasks", "stats"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={[
+                    "rounded-2xl px-4 py-2 text-sm border transition",
+                    tab === t
+                      ? "bg-white text-black border-white"
+                      : "bg-white/[0.05] text-zinc-200 border-white/10 hover:border-white/20",
+                  ].join(" ")}
+                >
+                  {t === "tasks" ? "Tasks" : "Stats"}
+                </button>
+              ))}
+            </div>
 
-                        <button
-                          onClick={() => removeTodo(t.id)}
+            {/* Stats cards */}
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <GlassCard title="Points" value={points} subtitle="= done tasks" />
+              <GlassCard
+                title="Streak"
+                value={`${streak} 🔥`}
+                subtitle="days in a row"
+                accent="from-violet-400 via-fuchsia-400 to-rose-400"
+              />
+              <GlassCard
+                title="Progress"
+                value={`${totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100)}%`}
+                subtitle="done / total"
+                accent="from-sky-400 via-cyan-400 to-emerald-400"
+              />
+            </div>
+
+            {/* TASKS */}
+            {tab === "tasks" && (
+              <>
+                {/* Desktop add bar */}
+                <div className="mt-5 hidden sm:block">
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+                    <form onSubmit={addTodo} className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        placeholder={user ? `Add to ${categoryLabel}…` : "Sign in to add tasks…"}
+                        className="flex-1 rounded-2xl bg-zinc-900/40 border border-white/10 px-4 py-3 outline-none focus:border-white/20"
+                        disabled={!user}
+                      />
+
+                      {/* Due date only for Work/Workout */}
+                      {(category === "work" || category === "workout") && (
+                        <input
+                          type="date"
+                          value={due}
+                          onChange={(e) => setDue(e.target.value)}
+                          className="rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
                           disabled={!user}
-                          className="text-zinc-400 hover:text-white disabled:opacity-40 text-lg leading-none"
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
+                        />
+                      )}
+
+                      <PrimaryButton type="submit" disabled={!user}>
+                        Add
+                      </PrimaryButton>
+                    </form>
+
+                    {/* Workout part chips */}
+                    {category === "workout" && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
+                          <Chip
+                            key={p}
+                            active={workoutPart === p}
+                            label={partLabel[p]}
+                            onClick={() => setWorkoutPart(p)}
+                          />
+                        ))}
                       </div>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          </>
-        )}
+                    )}
 
-        {/* STATS */}
-        {tab === "stats" && (
-          <div className="mt-5 space-y-4">
-            <AreaChart14Days values={last14.values} labels={last14.labels} />
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {(
+                          [
+                            ["all", "All"],
+                            ["today", "Today"],
+                            ["tomorrow", "Tomorrow"],
+                            ["week", "This week"],
+                            ["active", "Active"],
+                            ["done", "Done"],
+                          ] as const
+                        ).map(([f, label]) => (
+                          <Chip key={f} active={filter === f} label={label} onClick={() => setFilter(f)} />
+                        ))}
+                      </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-              <div>
-                <div className="text-zinc-100 font-semibold">Weekly calendar</div>
-                <div className="text-zinc-400 text-sm">
-                  Tasks grouped by planned day (Mon–Sun). Add inline directly into a day.
+                      <button
+                        onClick={clearDone}
+                        disabled={!user || doneCount === 0}
+                        className="rounded-2xl px-3 py-2 text-sm bg-white/[0.05] border border-white/10 text-zinc-200 hover:border-white/20 disabled:opacity-40 transition"
+                      >
+                        Clear done
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {weekStats.arr.map((d) => {
-                  const list = weekTasksByDay[d.key] ?? [];
-                  const doneInDay = list.filter((t) => t.done).length;
-                  const totalInDay = list.length;
-
-                  return (
-                    <div key={d.key} className="rounded-2xl border border-white/10 bg-zinc-950/30 p-3">
-                      <div className="flex items-baseline justify-between">
-                        <div className="text-sm font-semibold text-zinc-100">
-                          {d.wd} <span className="text-zinc-500 font-normal">({d.date})</span>
-                        </div>
-                        <div className="text-xs text-zinc-400">
-                          {doneInDay}/{totalInDay}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {list.length === 0 ? (
-                          <div className="text-sm text-zinc-500">No tasks.</div>
-                        ) : (
-                          list.map((t) => (
-                            <div
-                              key={t.id}
-                              className="flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
+                {/* List */}
+                <ul className="mt-4 space-y-2">
+                  {visibleTodos.length === 0 ? (
+                    <li className="text-zinc-400">Nothing to show.</li>
+                  ) : (
+                    visibleTodos.map((t) => {
+                      const planned = t.dueDay ?? dayKey(new Date());
+                      return (
+                        <li
+                          key={t.id}
+                          className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl px-4 py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <button
+                              onClick={() => toggleTodo(t.id)}
+                              className="flex items-start gap-3 text-left min-w-0"
+                              disabled={!user}
                             >
-                              <button
-                                onClick={() => toggleTodo(t.id)}
-                                disabled={!user}
-                                className="flex items-start gap-2 text-left min-w-0"
+                              <span
+                                className={[
+                                  "mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full border",
+                                  t.done
+                                    ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
+                                    : "border-white/20 text-zinc-300",
+                                ].join(" ")}
                               >
-                                <span
-                                  className={[
-                                    "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border",
-                                    t.done
-                                      ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
-                                      : "border-white/20 text-zinc-300",
-                                  ].join(" ")}
-                                >
-                                  {t.done ? "✓" : ""}
-                                </span>
+                                {t.done ? "✓" : ""}
+                              </span>
 
-                                <span className={`text-sm break-words ${t.done ? "line-through text-zinc-400" : "text-zinc-100"}`}>
+                              <div className="flex flex-col min-w-0">
+                                <span className={t.done ? "line-through text-zinc-400" : "text-zinc-100"}>
                                   {t.text}
                                 </span>
-                              </button>
 
-                              <button
-                                onClick={() => removeTodo(t.id)}
-                                disabled={!user}
-                                className="text-zinc-400 hover:text-white text-sm disabled:opacity-40 flex-shrink-0"
-                                title="Delete"
-                              >
-                                ✕
-                              </button>
+                                <div className="text-xs text-zinc-400 mt-1 flex flex-wrap gap-x-2 gap-y-1">
+                                  <span className="text-zinc-500">{categoryLabel}</span>
+
+                                  {category !== "daily" && (
+                                    <span>
+                                      planned <span className="text-zinc-200">{labelWeekdayEN(planned)}</span>{" "}
+                                      ({labelDate(planned)})
+                                    </span>
+                                  )}
+
+                                  {category === "workout" && t.workoutPart ? (
+                                    <span className="text-zinc-200">• {partLabel[t.workoutPart]}</span>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              onClick={() => removeTodo(t.id)}
+                              disabled={!user}
+                              className="text-zinc-400 hover:text-white disabled:opacity-40 text-lg leading-none"
+                              title="Delete"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+              </>
+            )}
+
+            {/* STATS */}
+            {tab === "stats" && (
+              <div className="mt-5 space-y-4">
+                <AreaChart14Days values={last14.values} labels={last14.labels} />
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+                  <div>
+                    <div className="text-zinc-100 font-semibold">Weekly calendar</div>
+                    <div className="text-zinc-400 text-sm">
+                      This view is based on planned day (Mon–Sun) for the current section.
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {weekStats.arr.map((d) => {
+                      const list = weekTasksByDay[d.key] ?? [];
+                      const doneInDay = list.filter((t) => t.done).length;
+                      const totalInDay = list.length;
+
+                      return (
+                        <div key={d.key} className="rounded-2xl border border-white/10 bg-zinc-950/30 p-3">
+                          <div className="flex items-baseline justify-between">
+                            <div className="text-sm font-semibold text-zinc-100">
+                              {d.wd} <span className="text-zinc-500 font-normal">({d.date})</span>
                             </div>
-                          ))
-                        )}
-                      </div>
-
-                      <div className="mt-3">
-                        {inlineDay !== d.key ? (
-                          <button
-                            onClick={() => {
-                              setInlineDay(d.key);
-                              setInlineText("");
-                            }}
-                            disabled={!user}
-                            className="text-sm text-zinc-200 hover:text-white underline underline-offset-4 disabled:opacity-40"
-                          >
-                            + add task
-                          </button>
-                        ) : (
-                          <div className="mt-2 flex flex-col gap-2">
-                            <input
-                              value={inlineText}
-                              onChange={(e) => setInlineText(e.target.value)}
-                              placeholder="New task…"
-                              className="w-full rounded-xl bg-zinc-900/40 border border-white/10 px-3 py-2 text-sm outline-none focus:border-white/20"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") addTodoInline(d.key);
-                                if (e.key === "Escape") {
-                                  setInlineDay(null);
-                                  setInlineText("");
-                                }
-                              }}
-                            />
-                            <div className="flex gap-2">
-                              <PrimaryButton onClick={() => addTodoInline(d.key)} className="flex-1 py-2">
-                                Add
-                              </PrimaryButton>
-                              <button
-                                onClick={() => {
-                                  setInlineDay(null);
-                                  setInlineText("");
-                                }}
-                                className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold bg-white/[0.05] border border-white/10 text-zinc-200 hover:border-white/20"
-                              >
-                                Cancel
-                              </button>
+                            <div className="text-xs text-zinc-400">
+                              {doneInDay}/{totalInDay}
                             </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
 
-              <div className="mt-3 text-xs text-zinc-500">
-                Tip: Press <span className="text-zinc-200">Enter</span> to add,{" "}
-                <span className="text-zinc-200">Esc</span> to cancel.
+                          <div className="mt-3 space-y-2">
+                            {list.length === 0 ? (
+                              <div className="text-sm text-zinc-500">No tasks.</div>
+                            ) : (
+                              list.map((t) => (
+                                <div
+                                  key={t.id}
+                                  className="flex items-start justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
+                                >
+                                  <button
+                                    onClick={() => toggleTodo(t.id)}
+                                    disabled={!user}
+                                    className="flex items-start gap-2 text-left min-w-0"
+                                  >
+                                    <span
+                                      className={[
+                                        "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border",
+                                        t.done
+                                          ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-200"
+                                          : "border-white/20 text-zinc-300",
+                                      ].join(" ")}
+                                    >
+                                      {t.done ? "✓" : ""}
+                                    </span>
+
+                                    <span
+                                      className={`text-sm break-words ${
+                                        t.done ? "line-through text-zinc-400" : "text-zinc-100"
+                                      }`}
+                                    >
+                                      {t.text}
+                                      {category === "workout" && t.workoutPart ? (
+                                        <span className="text-zinc-400"> • {partLabel[t.workoutPart]}</span>
+                                      ) : null}
+                                    </span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => removeTodo(t.id)}
+                                    disabled={!user}
+                                    className="text-zinc-400 hover:text-white text-sm disabled:opacity-40 flex-shrink-0"
+                                    title="Delete"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          <div className="mt-3">
+                            {inlineDay !== d.key ? (
+                              <button
+                                onClick={() => {
+                                  setInlineDay(d.key);
+                                  setInlineText("");
+                                }}
+                                disabled={!user}
+                                className="text-sm text-zinc-200 hover:text-white underline underline-offset-4 disabled:opacity-40"
+                              >
+                                + add task
+                              </button>
+                            ) : (
+                              <div className="mt-2 flex flex-col gap-2">
+                                <input
+                                  value={inlineText}
+                                  onChange={(e) => setInlineText(e.target.value)}
+                                  placeholder="New task…"
+                                  className="w-full rounded-xl bg-zinc-900/40 border border-white/10 px-3 py-2 text-sm outline-none focus:border-white/20"
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") addTodoInline(d.key);
+                                    if (e.key === "Escape") {
+                                      setInlineDay(null);
+                                      setInlineText("");
+                                    }
+                                  }}
+                                />
+                                <div className="flex gap-2">
+                                  <PrimaryButton onClick={() => addTodoInline(d.key)} className="flex-1 py-2">
+                                    Add
+                                  </PrimaryButton>
+                                  <button
+                                    onClick={() => {
+                                      setInlineDay(null);
+                                      setInlineText("");
+                                    }}
+                                    className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold bg-white/[0.05] border border-white/10 text-zinc-200 hover:border-white/20"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-3 text-xs text-zinc-500">
+                    Tip: Press <span className="text-zinc-200">Enter</span> to add,{" "}
+                    <span className="text-zinc-200">Esc</span> to cancel.
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
+          </section>
+        </div>
       </div>
 
       {/* Sticky Add Bar (MOBILE) */}
@@ -896,27 +1097,43 @@ export default function Home() {
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={user ? "Add a task…" : "Sign in to add tasks…"}
+              placeholder={user ? `Add to ${categoryLabel}…` : "Sign in to add tasks…"}
               className="w-full rounded-2xl bg-zinc-900/50 border border-white/10 px-4 py-3 outline-none focus:border-white/20 text-base"
               disabled={!user}
             />
+
             <div className="flex gap-2">
-              <input
-                type="date"
-                value={due}
-                onChange={(e) => setDue(e.target.value)}
-                className="flex-1 rounded-2xl bg-zinc-900/50 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
-                disabled={!user}
-              />
+              {(category === "work" || category === "workout") ? (
+                <input
+                  type="date"
+                  value={due}
+                  onChange={(e) => setDue(e.target.value)}
+                  className="flex-1 rounded-2xl bg-zinc-900/50 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
+                  disabled={!user}
+                />
+              ) : (
+                <div className="flex-1 rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-3 text-zinc-400 text-sm flex items-center">
+                  No date (Daily)
+                </div>
+              )}
+
               <PrimaryButton type="submit" disabled={!user} className="px-5">
                 Add
               </PrimaryButton>
             </div>
+
+            {category === "workout" && (
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
+                  <Chip key={p} active={workoutPart === p} label={partLabel[p]} onClick={() => setWorkoutPart(p)} />
+                ))}
+              </div>
+            )}
           </form>
         </div>
       </div>
 
-      {/* Bottom Nav (MOBILE) */}
+      {/* Bottom Nav (MOBILE): Tasks/Stats */}
       <div className="sm:hidden fixed left-0 right-0 bottom-0 px-4 pb-4">
         <div className="rounded-3xl border border-white/10 bg-zinc-950/60 backdrop-blur-xl p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
           <div className="grid grid-cols-2 gap-2">
