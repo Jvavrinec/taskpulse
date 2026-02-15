@@ -43,9 +43,8 @@ type Todo = {
   category: Category;
 
   doneAt?: number;
-  doneDay?: string; // YYYY-MM-DD
-  dueDay?: string; // YYYY-MM-DD
-
+  doneDay?: string; // YYYY-MM-DD (local)
+  dueDay?: string; // YYYY-MM-DD (planned day)  ✅ now used for ALL categories
   workoutPart?: WorkoutPart;
 };
 
@@ -59,7 +58,7 @@ type WorkoutPlan = Record<WeekdayKey, { enabled: boolean; part: WorkoutPart }>;
    Constants
 ========================= */
 
-const LS_KEY = "taskpulse_cache_v13";
+const LS_KEY = "taskpulse_cache_v14";
 
 const partLabel: Record<WorkoutPart, string> = {
   chest: "Chest",
@@ -184,6 +183,7 @@ function fromFirestoreTodo(id: string, data: any): Todo {
 ========================= */
 
 function niceCeil(n: number) {
+  if (n <= 5) return 5;
   if (n <= 10) return 10;
   if (n <= 20) return 20;
   if (n <= 50) return 50;
@@ -252,14 +252,7 @@ function AreaChart14Days({ values, labels }: { values: number[]; labels: string[
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <svg
-          width={W}
-          height={H}
-          viewBox={`0 0 ${W} ${H}`}
-          className="min-w-[900px]"
-          role="img"
-          aria-label="Area chart of cumulative done tasks"
-        >
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="min-w-[900px]">
           <g opacity="0.35">
             {[0, 0.25, 0.5, 0.75, 1].map((k) => {
               const y = P + k * innerH;
@@ -448,7 +441,10 @@ export default function Home() {
   const [filter, setFilter] = useState<Filter>("all");
 
   const [text, setText] = useState("");
+
+  // ✅ due is used for ALL categories now (including Daily)
   const [due, setDue] = useState<string>(dayKey(new Date()));
+
   const [workoutPart, setWorkoutPart] = useState<WorkoutPart>("chest");
 
   const [inlineDay, setInlineDay] = useState<string | null>(null);
@@ -642,13 +638,14 @@ export default function Home() {
       done: false,
       createdAt: Date.now(),
       category,
+      dueDay: due, // ✅ DAILY too
     };
 
     const newTodo: Todo =
       category === "workout"
-        ? { ...base, dueDay: due, workoutPart }
+        ? { ...base, workoutPart }
         : category === "work"
-        ? { ...base, dueDay: due }
+        ? { ...base }
         : { ...base };
 
     setTodos((prev) => [newTodo, ...prev]);
@@ -659,6 +656,7 @@ export default function Home() {
     } catch {}
   }
 
+  // ✅ Inline add ALWAYS sets dueDay to clicked day (daily/work/workout)
   async function addTodoInline(day: string) {
     if (!user) return;
     const trimmed = inlineText.trim();
@@ -670,21 +668,17 @@ export default function Home() {
       done: false,
       createdAt: Date.now(),
       category,
+      dueDay: day, // ✅ key fix
     };
 
-  let newTodo: Todo = { ...base, dueDay: day };
+    let newTodo: Todo = { ...base };
 
-if (category === "workout") {
-  const wd = toWeekdayKeyFromDate(new Date(day));
-  const planned = plan[wd];
-  const part = planned?.enabled ? planned.part : workoutPart;
-  newTodo = { ...base, dueDay: day, workoutPart: part };
-} else if (category === "work") {
-  newTodo = { ...base, dueDay: day };
-} else {
-  // daily
-  newTodo = { ...base, dueDay: day };
-}
+    if (category === "workout") {
+      const wd = toWeekdayKeyFromDate(new Date(day));
+      const planned = plan[wd];
+      const part = planned?.enabled ? planned.part : workoutPart;
+      newTodo = { ...base, workoutPart: part };
+    }
 
     setTodos((prev) => [newTodo, ...prev]);
     setInlineText("");
@@ -726,7 +720,7 @@ if (category === "workout") {
     } catch {}
   }
 
-  /* ---------- Filters (per category) ---------- */
+  /* ---------- Filters ---------- */
 
   const visibleTodos = useMemo(() => {
     const today = dayKey(new Date());
@@ -754,7 +748,7 @@ if (category === "workout") {
     return filtered;
   }, [todosInCat, filter]);
 
-  /* ---------- Weekly calendar & 14d chart (per category) ---------- */
+  /* ---------- Weekly calendar & 14d chart ---------- */
 
   const weekStats = useMemo(() => {
     const keys = weekKeysMonSun(new Date());
@@ -853,21 +847,13 @@ if (category === "workout") {
             <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
               <div className="text-xs text-zinc-400 mb-3">Sections</div>
               <div className="space-y-2">
-                <CatButton
-                  active={category === "daily"}
-                  label="Daily"
-                  onClick={() => setCategory("daily")}
-                />
+                <CatButton active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
                 <CatButton
                   active={category === "workout"}
                   label="Workout"
                   onClick={() => setCategory("workout")}
                 />
-                <CatButton
-                  active={category === "work"}
-                  label="Work"
-                  onClick={() => setCategory("work")}
-                />
+                <CatButton active={category === "work"} label="Work" onClick={() => setCategory("work")} />
               </div>
 
               <div className="mt-4 pt-4 border-t border-white/10 text-xs text-zinc-500">
@@ -912,7 +898,7 @@ if (category === "workout") {
               )}
             </div>
 
-            {/* Category pills (mobile) */}
+            {/* Category chips (mobile) */}
             <div className="lg:hidden mt-4 flex gap-2">
               <Chip active={category === "daily"} label="Daily" onClick={() => setCategory("daily")} />
               <Chip active={category === "workout"} label="Workout" onClick={() => setCategory("workout")} />
@@ -954,15 +940,13 @@ if (category === "workout") {
               />
             </div>
 
-            {/* WORKOUT PLAN as big calendar grid */}
+            {/* Workout plan (Mon–Sun) */}
             {category === "workout" && (
               <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
                 <div className="flex items-end justify-between gap-3">
                   <div>
                     <div className="text-zinc-100 font-semibold">Workout week plan</div>
-                    <div className="text-zinc-400 text-sm">
-                      Plan what you train on each weekday (Mon–Sun).
-                    </div>
+                    <div className="text-zinc-400 text-sm">Plan what you train on each weekday (Mon–Sun).</div>
                   </div>
                   <div className="text-xs text-zinc-500">{user ? "Saved to cloud" : "Sign in to save"}</div>
                 </div>
@@ -971,10 +955,7 @@ if (category === "workout") {
                   {weekdayOrder.map((d) => {
                     const row = plan[d];
                     return (
-                      <div
-                        key={d}
-                        className="rounded-2xl border border-white/10 bg-zinc-950/30 p-4"
-                      >
+                      <div key={d} className="rounded-2xl border border-white/10 bg-zinc-950/30 p-4">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-sm font-semibold text-zinc-100">{weekdayName[d]}</div>
 
@@ -988,7 +969,6 @@ if (category === "workout") {
                                 : "bg-white/[0.05] border-white/10",
                               !user ? "opacity-50" : "",
                             ].join(" ")}
-                            title={row.enabled ? "Enabled" : "Disabled"}
                           >
                             <span
                               className={[
@@ -1023,25 +1003,19 @@ if (category === "workout") {
                         </div>
 
                         <div className="mt-3 text-xs text-zinc-500">
-                          {row.enabled
-                            ? "Auto used when you add a workout task on this weekday."
-                            : "Disabled = no default body part."}
+                          {row.enabled ? "Auto used when you add a workout on this weekday." : "Disabled = no default."}
                         </div>
                       </div>
                     );
                   })}
                 </div>
-
-                <div className="mt-3 text-xs text-zinc-500">
-                  Tip: If the day is enabled, workout tasks on that weekday will automatically get the planned body part.
-                </div>
               </div>
             )}
 
-            {/* TASKS */}
+            {/* TASKS TAB */}
             {tab === "tasks" && (
               <>
-                {/* Desktop add bar */}
+                {/* Add bar (desktop) */}
                 <div className="mt-5 hidden sm:block">
                   <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
                     <form onSubmit={addTodo} className="flex flex-col sm:flex-row gap-2">
@@ -1053,15 +1027,14 @@ if (category === "workout") {
                         disabled={!user}
                       />
 
-                      {(category === "work" || category === "workout") && (
-                        <input
-                          type="date"
-                          value={due}
-                          onChange={(e) => setDue(e.target.value)}
-                          className="rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
-                          disabled={!user}
-                        />
-                      )}
+                      {/* ✅ date input now for ALL categories */}
+                      <input
+                        type="date"
+                        value={due}
+                        onChange={(e) => setDue(e.target.value)}
+                        className="rounded-2xl bg-zinc-900/40 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
+                        disabled={!user}
+                      />
 
                       <PrimaryButton type="submit" disabled={!user}>
                         Add
@@ -1071,12 +1044,7 @@ if (category === "workout") {
                     {category === "workout" && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
-                          <Chip
-                            key={p}
-                            active={workoutPart === p}
-                            label={partLabel[p]}
-                            onClick={() => setWorkoutPart(p)}
-                          />
+                          <Chip key={p} active={workoutPart === p} label={partLabel[p]} onClick={() => setWorkoutPart(p)} />
                         ))}
                       </div>
                     )}
@@ -1145,12 +1113,10 @@ if (category === "workout") {
                                 <div className="text-xs text-zinc-400 mt-1 flex flex-wrap gap-x-2 gap-y-1">
                                   <span className="text-zinc-500">{categoryLabel}</span>
 
-                                  {category !== "daily" && (
-                                    <span>
-                                      planned <span className="text-zinc-200">{labelWeekdayEN(planned)}</span>{" "}
-                                      ({labelDate(planned)})
-                                    </span>
-                                  )}
+                                  <span>
+                                    planned <span className="text-zinc-200">{labelWeekdayEN(planned)}</span> (
+                                    {labelDate(planned)})
+                                  </span>
 
                                   {category === "workout" && t.workoutPart ? (
                                     <span className="text-zinc-200">• {partLabel[t.workoutPart]}</span>
@@ -1176,7 +1142,7 @@ if (category === "workout") {
               </>
             )}
 
-            {/* STATS */}
+            {/* STATS TAB */}
             {tab === "stats" && (
               <div className="mt-5 space-y-4">
                 <AreaChart14Days values={last14.values} labels={last14.labels} />
@@ -1184,9 +1150,7 @@ if (category === "workout") {
                 <div className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
                   <div>
                     <div className="text-zinc-100 font-semibold">Weekly calendar</div>
-                    <div className="text-zinc-400 text-sm">
-                      Planned day (Mon–Sun). Add inline directly into a day.
-                    </div>
+                    <div className="text-zinc-400 text-sm">Planned day (Mon–Sun). Add inline directly into a day.</div>
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1244,7 +1208,7 @@ if (category === "workout") {
                                       }`}
                                     >
                                       {t.text}
-                                      {category === "workout" && t.workoutPart ? (
+                                      {t.category === "workout" && t.workoutPart ? (
                                         <span className="text-zinc-400"> • {partLabel[t.workoutPart]}</span>
                                       ) : null}
                                     </span>
@@ -1337,19 +1301,13 @@ if (category === "workout") {
             />
 
             <div className="flex gap-2">
-              {(category === "work" || category === "workout") ? (
-                <input
-                  type="date"
-                  value={due}
-                  onChange={(e) => setDue(e.target.value)}
-                  className="flex-1 rounded-2xl bg-zinc-900/50 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
-                  disabled={!user}
-                />
-              ) : (
-                <div className="flex-1 rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-3 text-zinc-400 text-sm flex items-center">
-                  No date (Daily)
-                </div>
-              )}
+              <input
+                type="date"
+                value={due}
+                onChange={(e) => setDue(e.target.value)}
+                className="flex-1 rounded-2xl bg-zinc-900/50 border border-white/10 px-3 py-3 outline-none focus:border-white/20 text-zinc-200"
+                disabled={!user}
+              />
 
               <PrimaryButton type="submit" disabled={!user} className="px-5">
                 Add
@@ -1359,12 +1317,7 @@ if (category === "workout") {
             {category === "workout" && (
               <div className="flex flex-wrap gap-2">
                 {(Object.keys(partLabel) as WorkoutPart[]).map((p) => (
-                  <Chip
-                    key={p}
-                    active={workoutPart === p}
-                    label={partLabel[p]}
-                    onClick={() => setWorkoutPart(p)}
-                  />
+                  <Chip key={p} active={workoutPart === p} label={partLabel[p]} onClick={() => setWorkoutPart(p)} />
                 ))}
               </div>
             )}
